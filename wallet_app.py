@@ -215,7 +215,6 @@ if wallet.history:
         "device_root_status", "risk_score", "triggered_rules", "status"
     ]
 
-    # Filter anomalies: PENDING step-ups, BLOCKED events, or compromised devices
     flagged_df = df[
         df["status"].str.contains("PENDING|BLOCKED", na=False) |
         (df["device_root_status"] == "compromised")
@@ -236,6 +235,15 @@ if wallet.history:
         else:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
+    # CSV Audit Log Export
+    csv_data = df[audit_cols].to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Export Audit Log (.CSV)",
+        data=csv_data,
+        file_name=f"{wallet.user_id}_telemetry_audit_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        mime="text/csv"
+    )
+
     # 4. Risk Diagnostics
     st.subheader("4. Risk Diagnostics Across Events")
     sns.set_theme(style="whitegrid")
@@ -247,4 +255,3 @@ if wallet.history:
     for p in ax.patches:
         ax.annotate(f"{p.get_height():.0f}", (p.get_x() + p.get_width() / 2., p.get_height() + 2), ha="center", fontweight="bold")
     st.pyplot(fig)
-
