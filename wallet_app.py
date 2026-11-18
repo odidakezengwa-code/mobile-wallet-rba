@@ -66,7 +66,7 @@ class RiskEngine:
 
 
 class MobileWallet:
-    """Models state persistence, telemetry, and transaction register."""
+    """Models Section 2.3 & 2.5: State persistence, telemetry, and transaction register."""
     def __init__(self, user_id="User_9921", initial_balance=20000.0):
         self.user_id = user_id
         self.balance = initial_balance
@@ -136,7 +136,7 @@ col1, col2 = st.columns(2)
 col1.metric(label="Active User Identifier", value=wallet.user_id)
 col2.metric(label="Current Wallet Balance", value=f"KSh {wallet.balance:,.2f}")
 
-# Sidebar Context Simulator & Reset Controls
+# Sidebar Context Simulator & Demo Reset Controls
 st.sidebar.header("Device & Context Simulator")
 location = st.sidebar.selectbox("Current Location", ["Home", "Office", "Local Grocery", "Coffee Shop", "Suspicious IP Address"])
 vpn_active = st.sidebar.checkbox("VPN Active", value=False)
@@ -206,7 +206,7 @@ if wallet.pending_tx:
             wallet.pending_tx = None
             st.rerun()
 
-# 3. Prototype Telemetry Journal
+# 3. Prototype Telemetry Journal & Security Operator Alert Filter
 if wallet.history:
     st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
     df = pd.DataFrame(wallet.history)
@@ -214,7 +214,27 @@ if wallet.history:
         "tx_id", "timestamp", "amount", "location",
         "device_root_status", "risk_score", "triggered_rules", "status"
     ]
-    st.dataframe(df[audit_cols], use_container_width=True)
+
+    # Filter anomalies: PENDING step-ups, BLOCKED events, or compromised devices
+    flagged_df = df[
+        df["status"].str.contains("PENDING|BLOCKED", na=False) |
+        (df["device_root_status"] == "compromised")
+    ]
+
+    tab_all, tab_alerts = st.tabs([
+        f"All Transactions ({len(df)})",
+        f"Security Operator Alerts ({len(flagged_df)})"
+    ])
+
+    with tab_all:
+        st.dataframe(df[audit_cols], use_container_width=True)
+
+    with tab_alerts:
+        if not flagged_df.empty:
+            st.warning(f"Active Investigation Queue: {len(flagged_df)} flagged event(s) require operator review.")
+            st.dataframe(flagged_df[audit_cols], use_container_width=True)
+        else:
+            st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
     # 4. Risk Diagnostics
     st.subheader("4. Risk Diagnostics Across Events")
@@ -227,3 +247,4 @@ if wallet.history:
     for p in ax.patches:
         ax.annotate(f"{p.get_height():.0f}", (p.get_x() + p.get_width() / 2., p.get_height() + 2), ha="center", fontweight="bold")
     st.pyplot(fig)
+
