@@ -1,7 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import hashlib
 import json
 from datetime import datetime
@@ -102,7 +100,7 @@ def save_to_history(record):
     compute_sha256_chain(st.session_state.history)
 
 
-# --- Plain Session State Initialization (Matches Original Working Architecture) ---
+# --- Plain Session State Initialization ---
 st.set_page_config(page_title="KES Mobile Wallet RBA", layout="wide")
 
 if "user_id" not in st.session_state:
@@ -244,3 +242,7 @@ if st.session_state.history:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
     # CSV Audit Log Export
+    csv_data = df[export_cols].to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Export Audit Log (.CSV)",
+        data=csv_data,
