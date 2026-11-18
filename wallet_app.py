@@ -241,8 +241,5 @@ if st.session_state.history:
         else:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
-    # CSV Audit Log Export
+    # CSV Audit Log Export (Single-line call to avoid copy-paste line breaks)
     csv_data = df[export_cols].to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📥 Export Audit Log (.CSV)",
-        data=csv_data,
