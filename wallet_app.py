@@ -1,5 +1,9 @@
 import streamlit as st
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import seaborn as sns
 import hashlib
 import json
 from datetime import datetime
@@ -97,7 +101,6 @@ def build_hashed_csv(df, audit_cols):
 
 
 def save_to_history(record):
-    """Updates an existing PENDING record or appends a new one."""
     for i, existing in enumerate(st.session_state.history):
         if existing["tx_id"] == record["tx_id"]:
             st.session_state.history[i] = record
@@ -105,7 +108,7 @@ def save_to_history(record):
     st.session_state.history.append(record)
 
 
-# --- Plain Session State Initialization ---
+# --- Session State Initialization ---
 st.set_page_config(page_title="KES Mobile Wallet RBA", layout="wide")
 
 if "user_id" not in st.session_state:
@@ -245,5 +248,5 @@ if st.session_state.history:
         else:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
-    # CSV Audit Log Export (SHA-256 hash chain generated exclusively for the downloaded CSV)
+    # CSV Audit Log Export (SHA-256 included exclusively in downloaded CSV)
     csv_data = build_hashed_csv(df, audit_cols)
