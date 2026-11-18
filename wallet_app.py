@@ -1,9 +1,5 @@
 import streamlit as st
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import seaborn as sns
 import hashlib
 import json
 from datetime import datetime
@@ -18,7 +14,6 @@ class RiskEngine:
         score = 0
         reasons = []
 
-        # 1. Amount Deviation Check (Max +40)
         if tx['amount'] > self.user_avg_amount * 5:
             score += 40
             reasons.append("High transaction amount (>5x baseline)")
@@ -26,18 +21,15 @@ class RiskEngine:
             score += 15
             reasons.append("Moderately elevated amount (>2x baseline)")
 
-        # 2. Location Trust Vector (+25)
         if tx['location'] not in self.user_trusted_locations:
             score += 25
             reasons.append(f"Untrusted location ({tx['location']})")
 
-        # 3. Temporal Anomaly Vector (+20) -> Off-hours (23:00 - 05:00)
         tx_hour = tx['hour']
         if tx_hour >= 23 or tx_hour <= 5:
             score += 20
             reasons.append("Off-hours window (23:00 - 05:00)")
 
-        # 4. Device Integrity Vector (Max +60)
         if tx['device_root_status'] == 'compromised':
             score += 60
             reasons.append("Device environment compromised/rooted")
@@ -47,7 +39,6 @@ class RiskEngine:
 
         final_score = min(score, 100)
 
-        # Policy Mapping
         if final_score >= 85 or tx['device_root_status'] == 'compromised':
             auth_tier = "Blocked (Critical Threat)"
             action = "BLOCK_TRANSACTION"
@@ -70,7 +61,6 @@ class RiskEngine:
 
 
 def build_hashed_csv(df, audit_cols):
-    """Attaches chained SHA-256 hashes exclusively to the exported CSV audit file."""
     export_df = df[audit_cols + ["user_id"]].copy()
     prev_hashes = []
     record_hashes = []
@@ -108,7 +98,6 @@ def save_to_history(record):
     st.session_state.history.append(record)
 
 
-# --- Session State Initialization ---
 st.set_page_config(page_title="KES Mobile Wallet RBA", layout="wide")
 
 if "user_id" not in st.session_state:
@@ -124,12 +113,10 @@ engine = RiskEngine()
 
 st.title("Mobile Wallet Transaction RBA Prototype")
 
-# Header Metrics
 col1, col2 = st.columns(2)
 col1.metric(label="Active User Identifier", value=st.session_state.user_id)
 col2.metric(label="Current Wallet Balance", value=f"KSh {st.session_state.balance:,.2f}")
 
-# Sidebar Context Simulator & Demo Reset Controls
 st.sidebar.header("Device & Context Simulator")
 location = st.sidebar.selectbox("Current Location", ["Home", "Office", "Local Grocery", "Coffee Shop", "Suspicious IP Address"])
 vpn_active = st.sidebar.checkbox("VPN Active", value=False)
@@ -144,7 +131,6 @@ if st.sidebar.button("Reset Wallet & History", type="secondary", use_container_w
     st.session_state.pending_tx = None
     st.rerun()
 
-# 1. Initiate Transaction
 st.subheader("1. Initiate Transaction")
 with st.form("tx_form"):
     description = st.text_input("Description", value="Local grocery checkout")
@@ -195,7 +181,6 @@ if submitted:
             save_to_history(record)
             st.error("Insufficient funds.")
 
-# 2. Step-Up Authentication Challenge
 if st.session_state.pending_tx:
     st.subheader("2. Step-Up Authentication Challenge")
     ptx = st.session_state.pending_tx
@@ -228,7 +213,6 @@ if st.session_state.pending_tx:
             st.session_state.pending_tx = None
             st.rerun()
 
-# 3. Prototype Telemetry Journal & Security Monitoring
 if st.session_state.history:
     st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
     df = pd.DataFrame(st.session_state.history)
@@ -248,5 +232,8 @@ if st.session_state.history:
         else:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
-    # CSV Audit Log Export (SHA-256 included exclusively in downloaded CSV)
     csv_data = build_hashed_csv(df, audit_cols)
+    st.download_button(label="Export Audit Log (.CSV)", data=csv_data, file_name=f"{st.session_state.user_id}_sha256_audit.csv", mime="text/csv")
+
+    st.subheader("4. Risk Diagnostics Across Events")
+    st.bar_chart(data=df, x="tx_id", y="risk_score")
