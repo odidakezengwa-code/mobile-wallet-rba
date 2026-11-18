@@ -243,16 +243,10 @@ st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
 if wallet.history:
     wallet.update_hashes()
     df = pd.DataFrame(wallet.history)
-    audit_cols = [
-        "tx_id", "timestamp", "amount", "location",
-        "device_root_status", "risk_score", "triggered_rules", "status", "sha256_hash"
-    ]
+    audit_cols = ["tx_id", "timestamp", "amount", "location", "device_root_status", "risk_score", "triggered_rules", "status", "sha256_hash"]
     export_cols = audit_cols + ["user_id", "prev_hash"]
 
-    flagged_df = df[
-        df["status"].str.contains("PENDING|BLOCKED", na=False) |
-        (df["device_root_status"] == "compromised")
-    ]
+    flagged_df = df[df["status"].str.contains("PENDING|BLOCKED", na=False) | (df["device_root_status"] == "compromised")]
 
-    tab_all, tab_alerts = st.tabs([
+    tab_all, tab_alerts = st.tabs([f"All Transactions ({len(df)})", f"Security Operator Alerts ({len(flagged_df)})"])
 
