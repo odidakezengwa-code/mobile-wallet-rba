@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import hashlib
+import json
 from datetime import datetime
 
 
@@ -66,19 +68,49 @@ class RiskEngine:
 
 
 class MobileWallet:
-    """Models Section 2.3 & 2.5: State persistence, telemetry, and transaction register."""
+    """Models state persistence, chained SHA-256 transaction hashing, and telemetry logging."""
     def __init__(self, user_id="User_9921", initial_balance=20000.0):
         self.user_id = user_id
         self.balance = initial_balance
         self.history = []
         self.pending_tx = None
 
+    @staticmethod
+    def generate_tx_hash(record, prev_hash):
+        """Computes a SHA-256 digest for each transaction linked to the previous hash."""
+        payload = {
+            "tx_id": str(record["tx_id"]),
+            "user_id": str(record["user_id"]),
+            "timestamp": str(record["timestamp"]),
+            "amount": float(record["amount"]),
+            "location": str(record["location"]),
+            "device_root_status": str(record["device_root_status"]),
+            "risk_score": int(record["risk_score"]),
+            "triggered_rules": str(record["triggered_rules"]),
+            "status": str(record["status"]),
+            "prev_hash": str(prev_hash)
+        }
+        canonical_str = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+    def update_hashes(self):
+        """Updates the sequential SHA-256 hash chain across all recorded transactions."""
+        prev_hash = "GENESIS_0000000000000000"
+        for entry in self.history:
+            entry["prev_hash"] = prev_hash
+            entry["sha256_hash"] = self.generate_tx_hash(entry, prev_hash)
+            prev_hash = entry["sha256_hash"]
+
     def log_transaction(self, record):
+        updated = False
         for i, existing in enumerate(self.history):
             if existing["tx_id"] == record["tx_id"]:
                 self.history[i] = record
-                return
-        self.history.append(record)
+                updated = True
+                break
+        if not updated:
+            self.history.append(record)
+        self.update_hashes()
 
     def process_transaction(self, tx, engine):
         if self.balance < tx["amount"]:
@@ -171,13 +203,13 @@ if submitted:
     record = wallet.process_transaction(tx, engine)
 
     if "SUCCESS" in record["status"]:
-        st.success(f"Approved silently! Risk Score: {record['risk_score']}")
+        st.success(f"Approved silently! Risk Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
     elif "BLOCKED" in record["status"]:
-        st.error(f"Transaction Blocked! Score: {record['risk_score']} | Reasons: {record['triggered_rules']}")
+        st.error(f"Transaction Blocked! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
     elif "FAILED" in record["status"]:
         st.error("Insufficient funds.")
     else:
-        st.warning(f"Step-Up Required! Score: {record['risk_score']} | Reasons: {record['triggered_rules']}")
+        st.warning(f"Step-Up Required! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
 
 # 2. Step-Up Authentication Challenge
 if wallet.pending_tx:
@@ -209,11 +241,13 @@ if wallet.pending_tx:
 # 3. Prototype Telemetry Journal & Security Operator Alert Filter
 if wallet.history:
     st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
+
     df = pd.DataFrame(wallet.history)
     audit_cols = [
         "tx_id", "timestamp", "amount", "location",
-        "device_root_status", "risk_score", "triggered_rules", "status"
+        "device_root_status", "risk_score", "triggered_rules", "status", "sha256_hash"
     ]
+    export_cols = audit_cols + ["user_id", "prev_hash"]
 
     flagged_df = df[
         df["status"].str.contains("PENDING|BLOCKED", na=False) |
@@ -225,33 +259,3 @@ if wallet.history:
         f"Security Operator Alerts ({len(flagged_df)})"
     ])
 
-    with tab_all:
-        st.dataframe(df[audit_cols], use_container_width=True)
-
-    with tab_alerts:
-        if not flagged_df.empty:
-            st.warning(f"Active Investigation Queue: {len(flagged_df)} flagged event(s) require operator review.")
-            st.dataframe(flagged_df[audit_cols], use_container_width=True)
-        else:
-            st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
-
-    # CSV Audit Log Export
-    csv_data = df[audit_cols].to_csv(index=False).encode("utf-8")
-    st.download_button(
-        label="📥 Export Audit Log (.CSV)",
-        data=csv_data,
-        file_name=f"{wallet.user_id}_telemetry_audit_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-        mime="text/csv"
-    )
-
-    # 4. Risk Diagnostics
-    st.subheader("4. Risk Diagnostics Across Events")
-    sns.set_theme(style="whitegrid")
-    fig, ax = plt.subplots(figsize=(8, 3.5))
-    sns.barplot(x="tx_id", y="risk_score", data=df, hue="tx_id", palette="RdYlGn_r", legend=False, ax=ax)
-    ax.set_ylim(0, 115)
-    ax.set_ylabel("Evaluated Threat Index (0 - 100)")
-    ax.set_xlabel("Transaction ID")
-    for p in ax.patches:
-        ax.annotate(f"{p.get_height():.0f}", (p.get_x() + p.get_width() / 2., p.get_height() + 2), ha="center", fontweight="bold")
-    st.pyplot(fig)
