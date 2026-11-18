@@ -65,39 +65,44 @@ class RiskEngine:
         }
 
 
-def compute_sha256_chain(history_list):
-    """Generates chained SHA-256 hashes across plain dictionary records."""
+def build_hashed_csv(df, audit_cols):
+    """Attaches chained SHA-256 hashes exclusively to the exported CSV audit file."""
+    export_df = df[audit_cols + ["user_id"]].copy()
+    prev_hashes = []
+    record_hashes = []
     prev_hash = "GENESIS_0000000000000000"
-    for entry in history_list:
-        entry["prev_hash"] = prev_hash
+
+    for _, row in export_df.iterrows():
+        prev_hashes.append(prev_hash)
         payload = {
-            "tx_id": str(entry["tx_id"]),
-            "user_id": str(entry["user_id"]),
-            "timestamp": str(entry["timestamp"]),
-            "amount": float(entry["amount"]),
-            "location": str(entry["location"]),
-            "device_root_status": str(entry["device_root_status"]),
-            "risk_score": int(entry["risk_score"]),
-            "triggered_rules": str(entry["triggered_rules"]),
-            "status": str(entry["status"]),
+            "tx_id": str(row["tx_id"]),
+            "user_id": str(row["user_id"]),
+            "timestamp": str(row["timestamp"]),
+            "amount": float(row["amount"]),
+            "location": str(row["location"]),
+            "device_root_status": str(row["device_root_status"]),
+            "risk_score": int(row["risk_score"]),
+            "triggered_rules": str(row["triggered_rules"]),
+            "status": str(row["status"]),
             "prev_hash": str(prev_hash)
         }
         canonical_str = json.dumps(payload, sort_keys=True)
-        entry["sha256_hash"] = hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
-        prev_hash = entry["sha256_hash"]
+        curr_hash = hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+        record_hashes.append(curr_hash)
+        prev_hash = curr_hash
+
+    export_df["prev_hash"] = prev_hashes
+    export_df["sha256_hash"] = record_hashes
+    return export_df.to_csv(index=False).encode("utf-8")
 
 
 def save_to_history(record):
-    """Updates an existing PENDING record or appends a new one, then updates hashes."""
-    updated = False
+    """Updates an existing PENDING record or appends a new one."""
     for i, existing in enumerate(st.session_state.history):
         if existing["tx_id"] == record["tx_id"]:
             st.session_state.history[i] = record
-            updated = True
-            break
-    if not updated:
-        st.session_state.history.append(record)
-    compute_sha256_chain(st.session_state.history)
+            return
+    st.session_state.history.append(record)
 
 
 # --- Plain Session State Initialization ---
@@ -163,7 +168,7 @@ if submitted:
             st.session_state.balance -= amount
             record["status"] = "SUCCESS (Silent)"
             save_to_history(record)
-            st.success(f"Approved silently! Risk Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+            st.success(f"Approved silently! Risk Score: {record['risk_score']}")
         else:
             record["status"] = "FAILED (Insufficient Funds)"
             save_to_history(record)
@@ -174,14 +179,14 @@ if submitted:
         record["status"] = "BLOCKED (Critical Risk)"
         save_to_history(record)
         st.session_state.pending_tx = None
-        st.error(f"Transaction Blocked! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+        st.error(f"Transaction Blocked! Score: {record['risk_score']} | Reasons: {record['triggered_rules']}")
 
     else:
         if st.session_state.balance >= amount:
             record["status"] = f"PENDING ({record['auth_tier']})"
             save_to_history(record)
             st.session_state.pending_tx = record
-            st.warning(f"Step-Up Required! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+            st.warning(f"Step-Up Required! Score: {record['risk_score']} | Reasons: {record['triggered_rules']}")
         else:
             record["status"] = "FAILED (Insufficient Funds)"
             save_to_history(record)
@@ -224,8 +229,7 @@ if st.session_state.pending_tx:
 if st.session_state.history:
     st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
     df = pd.DataFrame(st.session_state.history)
-    audit_cols = ["tx_id", "timestamp", "amount", "location", "device_root_status", "risk_score", "triggered_rules", "status", "sha256_hash"]
-    export_cols = audit_cols + ["user_id", "prev_hash"]
+    audit_cols = ["tx_id", "timestamp", "amount", "location", "device_root_status", "risk_score", "triggered_rules", "status"]
 
     flagged_df = df[df["status"].str.contains("PENDING|BLOCKED", na=False) | (df["device_root_status"] == "compromised")]
 
@@ -241,5 +245,5 @@ if st.session_state.history:
         else:
             st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
 
-    # CSV Audit Log Export (Single-line call to avoid copy-paste line breaks)
-    csv_data = df[export_cols].to_csv(index=False).encode("utf-8")
+    # CSV Audit Log Export (SHA-256 hash chain generated exclusively for the downloaded CSV)
+    csv_data = build_hashed_csv(df, audit_cols)
