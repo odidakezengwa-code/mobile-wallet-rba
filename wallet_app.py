@@ -67,106 +67,61 @@ class RiskEngine:
         }
 
 
-class MobileWallet:
-    """Models state persistence, chained SHA-256 transaction hashing, and telemetry logging."""
-    def __init__(self, user_id="User_9921", initial_balance=20000.0):
-        self.user_id = user_id
-        self.balance = initial_balance
-        self.history = []
-        self.pending_tx = None
-
-    @staticmethod
-    def generate_tx_hash(record, prev_hash):
-        """Computes a SHA-256 digest for each transaction linked to the previous hash."""
+def compute_sha256_chain(history_list):
+    """Generates chained SHA-256 hashes across plain dictionary records."""
+    prev_hash = "GENESIS_0000000000000000"
+    for entry in history_list:
+        entry["prev_hash"] = prev_hash
         payload = {
-            "tx_id": str(record["tx_id"]),
-            "user_id": str(record["user_id"]),
-            "timestamp": str(record["timestamp"]),
-            "amount": float(record["amount"]),
-            "location": str(record["location"]),
-            "device_root_status": str(record["device_root_status"]),
-            "risk_score": int(record["risk_score"]),
-            "triggered_rules": str(record["triggered_rules"]),
-            "status": str(record["status"]),
+            "tx_id": str(entry["tx_id"]),
+            "user_id": str(entry["user_id"]),
+            "timestamp": str(entry["timestamp"]),
+            "amount": float(entry["amount"]),
+            "location": str(entry["location"]),
+            "device_root_status": str(entry["device_root_status"]),
+            "risk_score": int(entry["risk_score"]),
+            "triggered_rules": str(entry["triggered_rules"]),
+            "status": str(entry["status"]),
             "prev_hash": str(prev_hash)
         }
         canonical_str = json.dumps(payload, sort_keys=True)
-        return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
-
-    def update_hashes(self):
-        """Updates the sequential SHA-256 hash chain across all recorded transactions."""
-        prev_hash = "GENESIS_0000000000000000"
-        for entry in self.history:
-            entry["prev_hash"] = prev_hash
-            entry["sha256_hash"] = self.generate_tx_hash(entry, prev_hash)
-            prev_hash = entry["sha256_hash"]
-
-    def log_transaction(self, record):
-        updated = False
-        for i, existing in enumerate(self.history):
-            if existing["tx_id"] == record["tx_id"]:
-                self.history[i] = record
-                updated = True
-                break
-        if not updated:
-            self.history.append(record)
-        self.update_hashes()
-
-    def process_transaction(self, tx, engine):
-        if self.balance < tx["amount"]:
-            eval_res = engine.evaluate_transaction(tx)
-            record = {**tx, **eval_res, "status": "FAILED (Insufficient Funds)"}
-            self.log_transaction(record)
-            return record
-
-        eval_res = engine.evaluate_transaction(tx)
-        record = {**tx, **eval_res}
-
-        if record["action"] == "ALLOW_SILENT":
-            self.balance -= tx["amount"]
-            record["status"] = "SUCCESS (Silent)"
-            self.pending_tx = None
-        elif record["action"] == "BLOCK_TRANSACTION":
-            record["status"] = "BLOCKED (Critical Risk)"
-            self.pending_tx = None
-        else:
-            record["status"] = f"PENDING ({record['auth_tier']})"
-            self.pending_tx = record
-
-        self.log_transaction(record)
-        return record
-
-    def complete_step_up(self, method_label):
-        if not self.pending_tx:
-            return False
-        if self.balance >= self.pending_tx["amount"]:
-            self.balance -= self.pending_tx["amount"]
-            self.pending_tx["status"] = f"SUCCESS ({method_label})"
-            self.log_transaction(self.pending_tx)
-            self.pending_tx = None
-            return True
-        else:
-            self.pending_tx["status"] = "FAILED (Insufficient Funds)"
-            self.log_transaction(self.pending_tx)
-            self.pending_tx = None
-            return False
+        entry["sha256_hash"] = hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+        prev_hash = entry["sha256_hash"]
 
 
-# --- Streamlit UI Initialization ---
+def save_to_history(record):
+    """Updates an existing PENDING record or appends a new one, then updates hashes."""
+    updated = False
+    for i, existing in enumerate(st.session_state.history):
+        if existing["tx_id"] == record["tx_id"]:
+            st.session_state.history[i] = record
+            updated = True
+            break
+    if not updated:
+        st.session_state.history.append(record)
+    compute_sha256_chain(st.session_state.history)
+
+
+# --- Plain Session State Initialization (Matches Original Working Architecture) ---
 st.set_page_config(page_title="KES Mobile Wallet RBA", layout="wide")
 
-if "wallet" not in st.session_state or not hasattr(st.session_state.wallet, "update_hashes"):
-    st.session_state.wallet = MobileWallet(user_id="User_9921", initial_balance=20000.0)
+if "user_id" not in st.session_state:
+    st.session_state.user_id = "User_9921"
+if "balance" not in st.session_state:
+    st.session_state.balance = 20000.0
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "pending_tx" not in st.session_state:
+    st.session_state.pending_tx = None
 
-wallet = st.session_state.wallet
 engine = RiskEngine()
 
 st.title("Mobile Wallet Transaction RBA Prototype")
 
 # Header Metrics
 col1, col2 = st.columns(2)
-col1.metric(label="Active User Identifier", value=wallet.user_id)
-col2.metric(label="Current Wallet Balance", value=f"KSh {wallet.balance:,.2f}")
+col1.metric(label="Active User Identifier", value=st.session_state.user_id)
+col2.metric(label="Current Wallet Balance", value=f"KSh {st.session_state.balance:,.2f}")
 
 # Sidebar Context Simulator & Demo Reset Controls
 st.sidebar.header("Device & Context Simulator")
@@ -178,7 +133,9 @@ hour = st.sidebar.slider("Simulated Hour of Day (0 - 23)", 0, 23, 15)
 st.sidebar.divider()
 st.sidebar.subheader("Demo Controls")
 if st.sidebar.button("Reset Wallet & History", type="secondary", use_container_width=True):
-    st.session_state.wallet = MobileWallet(user_id="User_9921", initial_balance=20000.0)
+    st.session_state.balance = 20000.0
+    st.session_state.history = []
+    st.session_state.pending_tx = None
     st.rerun()
 
 # 1. Initiate Transaction
@@ -190,8 +147,8 @@ with st.form("tx_form"):
 
 if submitted:
     tx = {
-        "tx_id": f"TX_{len(wallet.history) + 1:03d}",
-        "user_id": wallet.user_id,
+        "tx_id": f"TX_{len(st.session_state.history) + 1:03d}",
+        "user_id": st.session_state.user_id,
         "timestamp": f"{hour:02d}:{datetime.now().strftime('%M:%S')}",
         "amount": float(amount),
         "location": location,
@@ -200,49 +157,75 @@ if submitted:
         "device_vpn_active": vpn_active,
         "description": description
     }
-    record = wallet.process_transaction(tx, engine)
+    eval_res = engine.evaluate_transaction(tx)
+    record = {**tx, **eval_res}
 
-    if "SUCCESS" in record["status"]:
-        st.success(f"Approved silently! Risk Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
-    elif "BLOCKED" in record["status"]:
+    if record["action"] == "ALLOW_SILENT":
+        if st.session_state.balance >= amount:
+            st.session_state.balance -= amount
+            record["status"] = "SUCCESS (Silent)"
+            save_to_history(record)
+            st.success(f"Approved silently! Risk Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+        else:
+            record["status"] = "FAILED (Insufficient Funds)"
+            save_to_history(record)
+            st.error("Insufficient funds.")
+        st.session_state.pending_tx = None
+
+    elif record["action"] == "BLOCK_TRANSACTION":
+        record["status"] = "BLOCKED (Critical Risk)"
+        save_to_history(record)
+        st.session_state.pending_tx = None
         st.error(f"Transaction Blocked! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
-    elif "FAILED" in record["status"]:
-        st.error("Insufficient funds.")
+
     else:
-        st.warning(f"Step-Up Required! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+        if st.session_state.balance >= amount:
+            record["status"] = f"PENDING ({record['auth_tier']})"
+            save_to_history(record)
+            st.session_state.pending_tx = record
+            st.warning(f"Step-Up Required! Score: {record['risk_score']} | SHA-256: `{record['sha256_hash']}`")
+        else:
+            record["status"] = "FAILED (Insufficient Funds)"
+            save_to_history(record)
+            st.error("Insufficient funds.")
 
 # 2. Step-Up Authentication Challenge
-if wallet.pending_tx:
+if st.session_state.pending_tx:
     st.subheader("2. Step-Up Authentication Challenge")
-    ptx = wallet.pending_tx
+    ptx = st.session_state.pending_tx
     st.info(f"Action Required: **{ptx['auth_tier']}** for KSh {ptx['amount']:,.2f} ({ptx['tx_id']})")
 
     col_auth, col_cancel = st.columns(2)
     with col_auth:
         if ptx["action"] == "STEP_UP_MEDIUM":
             if st.button("Simulate Biometric Scan (Fingerprint / Face ID)"):
-                wallet.complete_step_up("Biometric Verified")
+                st.session_state.balance -= ptx["amount"]
+                ptx["status"] = "SUCCESS (Biometric Verified)"
+                save_to_history(ptx)
+                st.session_state.pending_tx = None
                 st.rerun()
         elif ptx["action"] == "STEP_UP_HIGH":
             otp = st.text_input("Enter 6-Digit SMS OTP (Use test code: 123456)")
             if st.button("Verify OTP"):
                 if otp == "123456":
-                    wallet.complete_step_up("MFA/OTP Verified")
+                    st.session_state.balance -= ptx["amount"]
+                    ptx["status"] = "SUCCESS (MFA/OTP Verified)"
+                    save_to_history(ptx)
+                    st.session_state.pending_tx = None
                     st.rerun()
                 else:
                     st.error("Invalid OTP code. Try 123456.")
     with col_cancel:
         if st.button("Cancel Transaction"):
             ptx["status"] = "CANCELLED (User Aborted)"
-            wallet.log_transaction(ptx)
-            wallet.pending_tx = None
+            save_to_history(ptx)
+            st.session_state.pending_tx = None
             st.rerun()
 
-# 3. Prototype Telemetry Journal & Security Operator Alert Filter
-st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
-if wallet.history:
-    wallet.update_hashes()
-    df = pd.DataFrame(wallet.history)
+# 3. Prototype Telemetry Journal & Security Monitoring
+if st.session_state.history:
+    st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
+    df = pd.DataFrame(st.session_state.history)
     audit_cols = ["tx_id", "timestamp", "amount", "location", "device_root_status", "risk_score", "triggered_rules", "status", "sha256_hash"]
     export_cols = audit_cols + ["user_id", "prev_hash"]
 
@@ -250,3 +233,14 @@ if wallet.history:
 
     tab_all, tab_alerts = st.tabs([f"All Transactions ({len(df)})", f"Security Operator Alerts ({len(flagged_df)})"])
 
+    with tab_all:
+        st.dataframe(df[audit_cols], use_container_width=True)
+
+    with tab_alerts:
+        if not flagged_df.empty:
+            st.warning(f"Active Investigation Queue: {len(flagged_df)} flagged event(s) require operator review.")
+            st.dataframe(flagged_df[audit_cols], use_container_width=True)
+        else:
+            st.success("No high-risk anomalies, pending step-ups, or compromised devices detected.")
+
+    # CSV Audit Log Export
