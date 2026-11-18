@@ -155,7 +155,7 @@ class MobileWallet:
 # --- Streamlit UI Initialization ---
 st.set_page_config(page_title="KES Mobile Wallet RBA", layout="wide")
 
-if "wallet" not in st.session_state:
+if "wallet" not in st.session_state or not hasattr(st.session_state.wallet, "update_hashes"):
     st.session_state.wallet = MobileWallet(user_id="User_9921", initial_balance=20000.0)
 
 wallet = st.session_state.wallet
@@ -239,9 +239,9 @@ if wallet.pending_tx:
             st.rerun()
 
 # 3. Prototype Telemetry Journal & Security Operator Alert Filter
+st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
 if wallet.history:
-    st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
-
+    wallet.update_hashes()
     df = pd.DataFrame(wallet.history)
     audit_cols = [
         "tx_id", "timestamp", "amount", "location",
@@ -255,7 +255,4 @@ if wallet.history:
     ]
 
     tab_all, tab_alerts = st.tabs([
-        f"All Transactions ({len(df)})",
-        f"Security Operator Alerts ({len(flagged_df)})"
-    ])
 
