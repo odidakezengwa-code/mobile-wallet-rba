@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from datetime import datetime
 
+
 class RiskEngine:
     def __init__(self):
         self.user_avg_amount = 450.0  # Baseline B = KSh 450.00
@@ -26,7 +27,7 @@ class RiskEngine:
             score += 25
             reasons.append(f"Untrusted location ({tx['location']})")
 
-        # 3. Temporal Anomaly Vector (+20) -> Fixed to include 23:00 to 05:00
+        # 3. Temporal Anomaly Vector (+20) -> Off-hours (23:00 - 05:00)
         tx_hour = tx['hour']
         if tx_hour >= 23 or tx_hour <= 5:
             score += 20
@@ -42,7 +43,7 @@ class RiskEngine:
 
         final_score = min(score, 100)
 
-        # Policy Mapping (Section 2.4.2 + Critical Device Safeguard)
+        # Policy Mapping
         if final_score >= 85 or tx['device_root_status'] == 'compromised':
             auth_tier = "Blocked (Critical Threat)"
             action = "BLOCK_TRANSACTION"
@@ -65,7 +66,7 @@ class RiskEngine:
 
 
 class MobileWallet:
-    """Models Section 2.3 & 2.5: State persistence, telemetry, and transaction register."""
+    """Models state persistence, telemetry, and transaction register."""
     def __init__(self, user_id="User_9921", initial_balance=20000.0):
         self.user_id = user_id
         self.balance = initial_balance
@@ -73,7 +74,6 @@ class MobileWallet:
         self.pending_tx = None
 
     def log_transaction(self, record):
-        # Update existing pending record if it already exists in history
         for i, existing in enumerate(self.history):
             if existing["tx_id"] == record["tx_id"]:
                 self.history[i] = record
@@ -101,7 +101,6 @@ class MobileWallet:
             record["status"] = f"PENDING ({record['auth_tier']})"
             self.pending_tx = record
 
-        # Log immediately so PENDING states are visible to security monitoring (Section 2.5 II)
         self.log_transaction(record)
         return record
 
@@ -132,17 +131,23 @@ engine = RiskEngine()
 
 st.title("Mobile Wallet Transaction RBA Prototype")
 
-# Header Metrics (Section 2.3.1 Structural Attributes)
+# Header Metrics
 col1, col2 = st.columns(2)
 col1.metric(label="Active User Identifier", value=wallet.user_id)
 col2.metric(label="Current Wallet Balance", value=f"KSh {wallet.balance:,.2f}")
 
-# Sidebar Context Simulator
+# Sidebar Context Simulator & Reset Controls
 st.sidebar.header("Device & Context Simulator")
 location = st.sidebar.selectbox("Current Location", ["Home", "Office", "Local Grocery", "Coffee Shop", "Suspicious IP Address"])
 vpn_active = st.sidebar.checkbox("VPN Active", value=False)
 root_status = st.sidebar.selectbox("Device Integrity", ["secure", "compromised"])
 hour = st.sidebar.slider("Simulated Hour of Day (0 - 23)", 0, 23, 15)
+
+st.sidebar.divider()
+st.sidebar.subheader("Demo Controls")
+if st.sidebar.button("Reset Wallet & History", type="secondary", use_container_width=True):
+    st.session_state.wallet = MobileWallet(user_id="User_9921", initial_balance=20000.0)
+    st.rerun()
 
 # 1. Initiate Transaction
 st.subheader("1. Initiate Transaction")
@@ -180,7 +185,7 @@ if wallet.pending_tx:
     ptx = wallet.pending_tx
     st.info(f"Action Required: **{ptx['auth_tier']}** for KSh {ptx['amount']:,.2f} ({ptx['tx_id']})")
 
-    col_auth, col_cancel = st.columns([3, 1])
+    col_auth, col_cancel = st.columns(2)
     with col_auth:
         if ptx["action"] == "STEP_UP_MEDIUM":
             if st.button("Simulate Biometric Scan (Fingerprint / Face ID)"):
@@ -201,7 +206,7 @@ if wallet.pending_tx:
             wallet.pending_tx = None
             st.rerun()
 
-# 3. Prototype Telemetry Journal (Section 2.5 Full Audit Footprint)
+# 3. Prototype Telemetry Journal
 if wallet.history:
     st.subheader("3. Prototype Telemetry Journal & Security Monitoring")
     df = pd.DataFrame(wallet.history)
